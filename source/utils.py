@@ -15,7 +15,7 @@ def preprocess_pdb(
     :type structure_path: str
     :param map_path: path to the map file
     :type map_path: str
-    :param sampling_radius: radius of the map patch to be extracted
+    :param sampling_radius: radius of the map patch to be extracted around each CA atom in angstroms
     :type sampling_radius: int
     :param output_directory: path to the output directory
     :type output_directory: str or None
@@ -31,17 +31,9 @@ def preprocess_pdb(
 
     if map_path.split(".")[-1] == "mtz":
         mtz_map = gemmi.read_mtz_file(map_path)
-        ccp_map = gemmi.Ccp4Map()
-        ccp_map.grid = mtz_map.transform_f_phi_to_map(
-            "2FOFCWT", "PH2FOFCWT", sample_rate=3
-        )
-        ccp_map.update_ccp4_header()
 
-    elif map_path.split(".")[-1] == "ccp4":
-        ccp_map = gemmi.read_ccp4_map(map_path)
-        ccp_map.update_ccp4_header()
     else:
-        raise ValueError("Map file must be in .ccp4 or .mtz format")
+        raise ValueError("Map file must be in .mtz format")
 
     # Creating the output directory
     if output_directory is not None:
@@ -84,14 +76,18 @@ def preprocess_pdb(
                 ca_atom = sel_ca.copy_structure_selection(structure_gemmi)
                 residue = sel_residue.copy_structure_selection(structure_gemmi)
 
+                ccp_map = gemmi.Ccp4Map()
+                ccp_map.grid = mtz_map.transform_f_phi_to_map(
+                    "2FOFCWT", "PH2FOFCWT", sample_rate=3
+                )
+                ccp_map.update_ccp4_header()
+
                 ccp_map.set_extent(
                     ca_atom.calculate_fractional_box(margin=sampling_radius)
                 )
                 ccp_map.write_ccp4_map(
                     os.path.join(extracted_map_dir, cra_str + ".ccp4")
                 )
-
-                ccp_map.setup(float("nan"))
 
                 residue.write_pdb(
                     os.path.join(extracted_amino_dir, cra_str + ".pdb"),
