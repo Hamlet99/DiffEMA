@@ -45,14 +45,7 @@ allowable_features = {
     'possible_is_in_ring6_list': [False, True],
     'possible_is_in_ring7_list': [False, True],
     'possible_is_in_ring8_list': [False, True],
-    'possible_amino_acids': ['ALA', 'ARG', 'ASN', 'ASP', 'CYS', 'GLN', 'GLU', 'GLY', 'HIS', 'ILE', 'LEU', 'LYS', 'MET',
-                             'PHE', 'PRO', 'SER', 'THR', 'TRP', 'TYR', 'VAL', 'HIP', 'HIE', 'TPO', 'HID', 'LEV', 'MEU',
-                             'PTR', 'GLV', 'CYT', 'SEP', 'HIZ', 'CYM', 'GLM', 'ASQ', 'TYS', 'CYX', 'GLZ', 'misc'],
-    'possible_atom_type_2': ['C*', 'CA', 'CB', 'CD', 'CE', 'CG', 'CH', 'CZ', 'N*', 'ND', 'NE', 'NH', 'NZ', 'O*', 'OD',
-                             'OE', 'OG', 'OH', 'OX', 'S*', 'SD', 'SG', 'misc'],
-    'possible_atom_type_3': ['C', 'CA', 'CB', 'CD', 'CD1', 'CD2', 'CE', 'CE1', 'CE2', 'CE3', 'CG', 'CG1', 'CG2', 'CH2',
-                             'CZ', 'CZ2', 'CZ3', 'N', 'ND1', 'ND2', 'NE', 'NE1', 'NE2', 'NH1', 'NH2', 'NZ', 'O', 'OD1',
-                             'OD2', 'OE1', 'OE2', 'OG', 'OG1', 'OH', 'OXT', 'SD', 'SG', 'misc'],
+    'possible_sig_levels': ['sig1', 'sig2', 'sig3', 'sig4']
 }
 bonds = {BT.SINGLE: 0, BT.DOUBLE: 1, BT.TRIPLE: 2, BT.AROMATIC: 3}
 
@@ -75,17 +68,10 @@ lig_feature_dims = (list(map(len, [
     allowable_features['possible_is_in_ring8_list'],
 ])), 0)  # number of scalar features
 
-rec_atom_feature_dims = (list(map(len, [
-    allowable_features['possible_amino_acids'],
-    allowable_features['possible_atomic_num_list'],
-    allowable_features['possible_atom_type_2'],
-    allowable_features['possible_atom_type_3'],
-])), 0)
 
 rec_residue_feature_dims = (list(map(len, [
-    allowable_features['possible_amino_acids']
+    allowable_features['possible_sig_levels']
 ])), 0)
-
 
 def lig_atom_featurizer(mol):
     ring_info = mol.GetRingInfo()
@@ -130,7 +116,8 @@ def moad_extract_receptor_structure(path, complex_graph, neighbor_cutoff=20, max
     all_coords = np.array(data[['x', 'y', 'z']].values)
 
     complex_graph['patch_ed'].num_nodes = len(all_coords)
-    complex_graph['patch_ed'].x = torch.tensor(data['i'].values.reshape(-1, 1), dtype=torch.float32)
+    intensities = np.clip(np.floor(data['i']), 1, 4) - 1
+    complex_graph['patch_ed'].x = torch.tensor(intensities.values.reshape(-1, 1), dtype=torch.float32)
 
     new_extract_receptor_structure(all_coords, complex_graph, neighbor_cutoff=neighbor_cutoff,
                                    max_neighbors=max_neighbors, knn_only_graph=knn_only_graph)

@@ -9,11 +9,28 @@ from torch_geometric.data.data import BaseData
 
 
 class Collater:
+    """
+    A collater class which merges data objects.
+    """
     def __init__(self, follow_batch, exclude_keys):
+        """
+        Initializes a new Collater object.
+        :param follow_batch: List of keys to recursively follow batch assignment.
+        :type follow_batch: List[str]
+        :param exclude_keys: List of keys to exclude from batch assignment.
+        :type exclude_keys: List[str]
+        """
         self.follow_batch = follow_batch
         self.exclude_keys = exclude_keys
 
     def __call__(self, batch):
+        """
+        Method to merge a list of data objects to a mini-batch.
+        :param batch: List of data objects.
+        :type batch: List[BaseData]
+        :return: Merged data objects.
+        :rtype: Batch
+        """
         batch = [x for x in batch if x is not None]
         elem = batch[0]
         if isinstance(elem, BaseData):
@@ -41,24 +58,11 @@ class Collater:
 
 
 class DataLoader(torch.utils.data.DataLoader):
-    r"""A data loader which merges data objects from a
-    :class:`torch_geometric.data.Dataset` to a mini-batch.
-    Data objects can be either of type :class:`~torch_geometric.data.Data` or
-    :class:`~torch_geometric.data.HeteroData`.
-
-    Args:
-        dataset (Dataset): The dataset from which to load the data.
-        batch_size (int, optional): How many samples per batch to load.
-            (default: :obj:`1`)
-        shuffle (bool, optional): If set to :obj:`True`, the data will be
-            reshuffled at every epoch. (default: :obj:`False`)
-        follow_batch (List[str], optional): Creates assignment batch
-            vectors for each key in the list. (default: :obj:`None`)
-        exclude_keys (List[str], optional): Will exclude each key in the
-            list. (default: :obj:`None`)
-        **kwargs (optional): Additional arguments of
-            :class:`torch.utils.data.DataLoader`.
     """
+    A data loader which merges data objects from a`torch_geometric.data.Dataset` class to a mini-batch.
+    Data objects can be either of type `~torch_geometric.data.Data` or `~torch_geometric.data.HeteroData` class.
+    """
+
     def __init__(
         self,
         dataset: Union[Dataset, List[BaseData]],
@@ -68,6 +72,20 @@ class DataLoader(torch.utils.data.DataLoader):
         exclude_keys: Optional[List[str]] = None,
         **kwargs,
     ):
+        """
+        Initializes a new DataLoader object.
+        :param dataset: The dataset from which to load the data.
+        :type dataset: Union[Dataset, List[BaseData]]
+        :param batch_size: How many samples per batch to load. (default: 1)
+        :type batch_size: int, optional
+        :param shuffle: If set to True, the data will be reshuffled at every epoch. (default: False)
+        :type shuffle: bool, optional
+        :param follow_batch: Creates assignment batch vectors for each key in the list. (default: None)
+        :type follow_batch: List[str], optional
+        :param exclude_keys: Will exclude each key in the list. (default: None)
+        :type exclude_keys: List[str], optional
+        :param **kwargs: Additional arguments of torch.utils.data.DataLoader.
+        """
 
         if 'collate_fn' in kwargs:
             del kwargs['collate_fn']
@@ -86,6 +104,7 @@ class DataLoader(torch.utils.data.DataLoader):
 
 
 def collate_fn(data_list):
+
     data_list = [x for x in data_list if x is not None]
     return data_list
 

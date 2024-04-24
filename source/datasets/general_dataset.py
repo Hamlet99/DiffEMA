@@ -117,7 +117,7 @@ class NoiseTransform(BaseTransform):
         return data
 
 
-class PDBBind(Dataset):
+class GeneralDataset(Dataset):
     def __init__(self, root, transform=None, cache_path='data/cache', split_path='data/', limit_complexes=0,
                  receptor_radius=30, num_workers=1, c_alpha_max_neighbors=None, popsize=15, maxiter=15,
                  matching=True, keep_original=False,  remove_hs=False, num_conformers=1, all_atoms=False,
@@ -127,7 +127,7 @@ class PDBBind(Dataset):
                  protein_file="protein_processed", ligand_file="ligand",
                  knn_only_graph=False, matching_tries=1, dataset='PDBBind'):
 
-        super(PDBBind, self).__init__(root, transform)
+        super(GeneralDataset, self).__init__(root, transform)
         self.pdbbind_dir = root
         self.include_miscellaneous_atoms = include_miscellaneous_atoms
         self.split_path = split_path
@@ -160,7 +160,6 @@ class PDBBind(Dataset):
                                             + ('' if protein_path_list is None or ligand_descriptions is None else str(binascii.crc32(''.join(ligand_descriptions + protein_path_list).encode())))
                                             + ('' if protein_file == "protein_processed" else '_' + protein_file)
                                             + ('' if not self.fixed_knn_radius_graph else (f'_fixedKNN' if not self.knn_only_graph else '_fixedKNNonly'))
-                                            + ('' if not self.include_miscellaneous_atoms else '_miscAtoms')
                                             + ('' if self.matching_tries == 1 else f'_tries{matching_tries}'))
         self.popsize, self.maxiter = popsize, maxiter
         self.matching, self.keep_original = matching, keep_original
@@ -209,7 +208,7 @@ class PDBBind(Dataset):
 
         # running preprocessing in parallel on multiple workers and saving the progress every processed complex
         list_indices = list(range(len(complex_names_all)))
-        random.shuffle(list_indices)
+        # random.shuffle(list_indices)
         for i in list_indices:
             if os.path.exists(os.path.join(self.full_cache_path, f"heterographs{i}.pkl")):
                 continue
@@ -218,7 +217,7 @@ class PDBBind(Dataset):
             if self.num_workers > 1:
                 p = Pool(self.num_workers, maxtasksperchild=1)
                 p.__enter__()
-            with tqdm(total=len(patch_names), desc=f'loading complexes {i}/{len(complex_names_all)}') as pbar:
+            with tqdm(total=len(patch_names), desc=f'Loading patches from complex {i+1}/{len(complex_names_all)}') as pbar:
                 map_fn = p.imap_unordered if self.num_workers > 1 else map
                 for t in map_fn(self.get_patch, zip(patch_names, [None] * len(patch_names), [None] * len(patch_names))):
                     complex_graphs.extend(t[0])
@@ -333,7 +332,11 @@ class PDBBind(Dataset):
                                         self.num_conformers, remove_hs=self.remove_hs, tries=self.matching_tries)
             ed_path_list = name.split('/')
             ed_path_list[-2] = 'extracted_point_clouds'
-            ed_path_list[-1] = ed_path_list[-1].split('.')[0] + '.csv'
+
+            if len(ed_path_list[-1].split('.')[-2]) == 1:
+                ed_path_list[-1] = f"{ed_path_list[-1].split('.')[0]}.{ed_path_list[-1].split('.')[-2]}.csv"
+            else:
+                ed_path_list[-1] = f"{ed_path_list[-1].split('.')[0]}.csv"
 
             moad_extract_receptor_structure(path='/'.join(ed_path_list),
                                             complex_graph=patch_graph,
@@ -362,18 +365,17 @@ class PDBBind(Dataset):
 
 def print_statistics(patch_graphs):
     statistics = ([], [], [], [], [], [])
-    receptor_sizes = []
+    patch_sizes = []
 
     for patch_graph in patch_graphs:
         lig_pos = patch_graph['ligand'].pos if torch.is_tensor(patch_graph['ligand'].pos) else patch_graph['ligand'].pos[0]
-        receptor_sizes.append(patch_graph['patch_ed'].pos.shape[0])
-        radius_protein = torch.max(torch.linalg.vector_norm(patch_graph['patch_ed'].pos, dim=1))
-        molecule_center = torch.mean(lig_pos, dim=0)
-        radius_molecule = torch.max(
-            torch.linalg.vector_norm(lig_pos - molecule_center.unsqueeze(0), dim=1))
-        distance_center = torch.linalg.vector_norm(molecule_center)
-        statistics[0].append(radius_protein)
-        statistics[1].append(radius_molecule)
+        patch_sizes.append(patch_graph['patch_ed'].pos.shape[0])
+        amino_center = torch.mean(lig_pos, dim=0)
+        radius_amino = torch.max(
+            torch.linalg.vector_norm(lig_pos - amino_center.unsqueeze(0), dim=1))
+        distance_center = torch.linalg.vector_norm(amino_center)
+        statistics[0].extend(patch_sizes)
+        statistics[1].append(radius_amino)
         statistics[2].append(distance_center)
         if "rmsd_matching" in patch_graph:
             statistics[3].append(patch_graph.rmsd_matching)
@@ -385,7 +387,8 @@ def print_statistics(patch_graphs):
 
     if len(statistics[5]) == 0:
         statistics[5].append(-1)
-    name = ['radius protein', 'radius molecule', 'distance protein-mol', 'rmsd matching', 'random coordinates', 'random rmsd matching']
+    name = ['Num patch nodes', 'Radius amino', 'Distance patch-amino',
+            'RMSD matching', 'Random coordinates', 'Random RMSD matching']
     print('Number of patches: ', len(patch_graphs))
     for i in range(len(name)):
         array = np.asarray(statistics[i])

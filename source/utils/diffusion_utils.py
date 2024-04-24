@@ -16,6 +16,14 @@ def t_to_sigma(t_tr, t_rot, t_tor, args):
     return tr_sigma, rot_sigma, tor_sigma
 
 
+def get_t_schedule(sigma_schedule, inference_steps, inf_sched_alpha=1, inf_sched_beta=1, t_max=1):
+    if sigma_schedule == 'expbeta':
+        lin_max = beta.cdf(t_max, a=inf_sched_alpha, b=inf_sched_beta)
+        c = np.linspace(lin_max, 0, inference_steps + 1)[:-1]
+        return beta.ppf(c, a=inf_sched_alpha, b=inf_sched_beta)
+    raise Exception()
+
+
 def modify_conformer(data, tr_update, rot_update, torsion_updates, pivot=None):
     lig_center = torch.mean(data['ligand'].pos, dim=0, keepdim=True)
     rot_mat = axis_angle_to_matrix(rot_update.squeeze())
@@ -44,6 +52,27 @@ def modify_conformer(data, tr_update, rot_update, torsion_updates, pivot=None):
     return data
 
 
+def modify_conformer_batch(orig_pos, data, tr_update, rot_update, torsion_updates, mask_rotate):
+    B = data.num_graphs
+    N, M, R = data['ligand'].num_nodes // B, data['ligand', 'ligand'].num_edges // B, data['ligand'].edge_mask.sum().item() // B
+
+    pos, edge_index, edge_mask = orig_pos.reshape(B, N, 3) + 0, data['ligand', 'ligand'].edge_index[:, :M], data['ligand'].edge_mask[:M]
+    torsion_updates = torsion_updates.reshape(B, -1) if torsion_updates is not None else None
+
+    lig_center = torch.mean(pos, dim=1, keepdim=True)
+    rot_mat = axis_angle_to_matrix(rot_update)
+    rigid_new_pos = torch.bmm(pos - lig_center, rot_mat.permute(0, 2, 1)) + tr_update.unsqueeze(1) + lig_center
+
+    if torsion_updates is not None:
+        flexible_new_pos = modify_conformer_torsion_angles_batch(rigid_new_pos, edge_index.T[edge_mask], mask_rotate, torsion_updates)
+        R, t = rigid_transform_Kabsch_3D_torch_batch(flexible_new_pos, rigid_new_pos)
+        aligned_flexible_pos = torch.bmm(flexible_new_pos, R.transpose(1, 2)) + t.transpose(1, 2)
+        final_pos = aligned_flexible_pos.reshape(-1, 3)
+    else:
+        final_pos = rigid_new_pos.reshape(-1, 3)
+    return final_pos
+
+
 def set_time(patch_graphs, t, t_tr, t_rot, t_tor, batchsize, all_atoms, device, include_miscellaneous_atoms=False):
     patch_graphs['ligand'].node_t = {
         'tr': t_tr * torch.ones(patch_graphs['ligand'].num_nodes).to(device),
@@ -56,3 +85,45 @@ def set_time(patch_graphs, t, t_tr, t_rot, t_tor, batchsize, all_atoms, device, 
     patch_graphs.complex_t = {'tr': t_tr * torch.ones(batchsize).to(device),
                               'rot': t_rot * torch.ones(batchsize).to(device),
                               'tor': t_tor * torch.ones(batchsize).to(device)}
+
+
+def sinusoidal_embedding(timesteps, embedding_dim, max_positions=10000):
+    """
+    Implemented from https://github.com/hojonathanho/diffusion/blob/master/diffusion_tf/nn.py
+    """
+
+    assert len(timesteps.shape) == 1
+    half_dim = embedding_dim // 2
+    emb = math.log(max_positions) / (half_dim - 1)
+    emb = torch.exp(torch.arange(half_dim, dtype=torch.float32, device=timesteps.device) * -emb)
+    emb = timesteps.float()[:, None] * emb[None, :]
+    emb = torch.cat([torch.sin(emb), torch.cos(emb)], dim=1)
+    if embedding_dim % 2 == 1:  # zero pad
+        emb = F.pad(emb, (0, 1), mode='constant')
+    assert emb.shape == (timesteps.shape[0], embedding_dim)
+    return emb
+
+
+class GaussianFourierProjection(nn.Module):
+    """Gaussian Fourier embeddings for noise levels.
+    from https://github.com/yang-song/score_sde_pytorch/blob/1618ddea340f3e4a2ed7852a0694a809775cf8d0/models/layerspp.py#L32
+    """
+
+    def __init__(self, embedding_size=256, scale=1.0):
+        super().__init__()
+        self.W = nn.Parameter(torch.randn(embedding_size//2) * scale, requires_grad=False)
+
+    def forward(self, x):
+        x_proj = x[:, None] * self.W[None, :] * 2 * np.pi
+        emb = torch.cat([torch.sin(x_proj), torch.cos(x_proj)], dim=-1)
+        return emb
+
+
+def get_timestep_embedding(embedding_type, embedding_dim, embedding_scale=10000):
+    if embedding_type == 'sinusoidal':
+        emb_func = (lambda x: sinusoidal_embedding(embedding_scale * x, embedding_dim))
+    elif embedding_type == 'fourier':
+        emb_func = GaussianFourierProjection(embedding_size=embedding_dim, scale=embedding_scale)
+    else:
+        raise NotImplemented
+    return emb_func
